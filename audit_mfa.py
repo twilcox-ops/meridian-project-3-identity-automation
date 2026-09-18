@@ -6,10 +6,7 @@ because it's one call instead of one call per user. AuditLog.Read.All was
 not the original plan; Graph's actual 403 body named it as also required
 when only Reports.Read.All was granted.
 
-NOT YET GRANTED in Entra as of this build. Before running: App
-registrations > (this app) > API permissions > Add a permission >
-Microsoft Graph > Application permissions > add both Reports.Read.All and
-AuditLog.Read.All, then Grant admin consent.
+Both granted and admin-consented in Entra.
 """
 import argparse
 import logging
