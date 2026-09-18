@@ -1,0 +1,14 @@
+.env
+.env.example
+.git
+.gitignore
+__pycache__
+**/__pycache__
+test_*.py
+REQUIREMENTS_CHECKLIST.md
+SAVE_POINT.md
+DECISIONS.md
+README.md
+report.html
+Dockerfile
+.dockerignore

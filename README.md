@@ -1,10 +1,10 @@
 # Project 3 — Identity Automation and Posture Audit
 
-Certificate auth via Key Vault, a Graph client wrapper (pagination + 429
-throttling), all 7 Part A audit checks (verified against the real tenant),
-and a severity-ranked HTML report with email delivery. Not built yet:
-scheduling and Part B write paths. See `REQUIREMENTS_CHECKLIST.md` and
-`DECISIONS.md` for scope.
+**Part A is complete and verified against real infrastructure**: cert
+auth, pagination, throttling, all 7 audit checks, permissions, the
+severity-ranked HTML report, email delivery, and nightly scheduling via an
+Azure Container Apps Job. Not built yet: Part B write paths. See
+`REQUIREMENTS_CHECKLIST.md` and `DECISIONS.md` for scope.
 
 ## Permissions
 
@@ -21,12 +21,14 @@ scheduling and Part B write paths. See `REQUIREMENTS_CHECKLIST.md` and
 
 ## Auth model
 
-Your own identity (`az login` / `AzureCliCredential`) reads the
-certificate out of Key Vault via `SecretClient`, since a Key Vault
-certificate's private key lives in its backing secret. The app then
-authenticates to Graph as itself using `CertificateCredential` built from
-those bytes. In production, swap the Key Vault identity for a managed
-identity.
+`DefaultAzureCredential` reads the certificate out of Key Vault via
+`SecretClient`, since a Key Vault certificate's private key lives in its
+backing secret. Locally this resolves to your own `az login` identity; in
+Azure (the nightly Container Apps Job) it resolves to that job's own
+system-assigned managed identity instead — same code path, no
+environment-specific branching. Either identity needs the "Key Vault
+Secrets User" role on the vault. The app then authenticates to Graph as
+itself using `CertificateCredential` built from the fetched bytes.
 
 ## Setup
 
@@ -117,13 +119,44 @@ unconfigured" behavior. What's different: Project 1 fetches its own Graph
 token with a client secret; this reuses this project's own cert-based,
 throttle-aware `GraphClient.post()` instead of duplicating that fetch.
 
-`Mail.Send` is **not yet granted** (RBAC for Applications, scoped to one
-mailbox -- see the permissions table and `mailer.py`'s docstring for exact
-grant steps). Until it's granted, running `build_report.py` with the env
-vars set will 403 on the send; without the env vars set it silently skips
-sending, which is safe to run today.
+`Mail.Send` is granted and scoped to one mailbox (see the permissions
+table). Verified: a real report was emailed and received with correct
+HTML rendering.
 
 ```bash
 python -m unittest test_mailer.py -v   # message shape + skip-when-unconfigured, no network
-python build_report.py --output report.html   # sends for real once GRAPH_SENDER_MAILBOX / GRAPH_REPORT_RECIPIENT are set and Mail.Send is granted
+python build_report.py --output report.html   # sends for real
+```
+
+## Running nightly in Azure
+
+Azure Container Apps Job, cron-scheduled -- same pattern as Project 1
+(`project-1-scheduled-pipeline`), which was never GitHub Actions either.
+No persistent state to mount and no secrets: every run re-queries the
+tenant fresh, and nothing in this project's env vars is sensitive (the
+certificate never leaves Key Vault).
+
+**Live deployment:**
+
+| Resource | Name |
+|---|---|
+| Job | `meridian-p3-audit-job` |
+| Resource group | `meridian-identity-audit-2-rg` |
+| Container registry | `meridianp3acr` |
+| Key Vault | `meridian-p3-redo-kv` |
+| Schedule | `0 2 * * *` (cron) |
+
+The job's system-assigned managed identity has `AcrPull` on
+`meridianp3acr` and `Key Vault Secrets User` on `meridian-p3-redo-kv`.
+
+**Known tradeoff:** ACR admin credentials are currently enabled as a
+fallback for image pull -- managed-identity pull hit auth errors during
+setup. Should be fixed and admin credentials disabled in a future session.
+
+**Verified:** a real run was triggered, completed with status `Succeeded`,
+and the report email was received.
+
+```bash
+az containerapp job start --name meridian-p3-audit-job --resource-group meridian-identity-audit-2-rg
+az containerapp job execution list --name meridian-p3-audit-job --resource-group meridian-identity-audit-2-rg -o table
 ```
