@@ -1,3 +1,5 @@
 .env
 __pycache__/
 *.pyc
+REQUIREMENTS_CHECKLIST.md
+SAVE_POINT.md
