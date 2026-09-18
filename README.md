@@ -1,9 +1,10 @@
 # Project 3 — Identity Automation and Posture Audit
 
 Certificate auth via Key Vault, a Graph client wrapper (pagination + 429
-throttling), and all 7 Part A audit checks with self-checks for each. Not
-built yet: the HTML report, email, scheduling, and Part B write paths. See
-`REQUIREMENTS_CHECKLIST.md` and `DECISIONS.md` for scope.
+throttling), all 7 Part A audit checks (verified against the real tenant),
+and a severity-ranked HTML report with email delivery. Not built yet:
+scheduling and Part B write paths. See `REQUIREMENTS_CHECKLIST.md` and
+`DECISIONS.md` for scope.
 
 ## Permissions
 
@@ -16,6 +17,7 @@ built yet: the HTML report, email, scheduling, and Part B write paths. See
 | `Application.Read.All` | Application | Yes | `audit_sp_creds.py`: read `/servicePrincipals` key/password credential expiry. |
 | `Group.Read.All` | Application | Yes | `audit_ownerless_groups.py`: list `/groups` and their `/owners`. |
 | `Device.Read.All` | Application | Yes | `audit_devices.py`: read `/devices` compliance and last check-in. |
+| `Mail.Send` | Application | Yes | `mailer.py`: send the report via `POST /users/{mailbox}/sendMail`. Granted in Entra, then scoped to one mailbox via an Exchange Online Application Access Policy — not tenant-wide. Two separate setup steps: the Entra permission grant, and the Exchange Online RBAC scoping. |
 
 ## Auth model
 
@@ -70,9 +72,8 @@ raises instead of continuing to retry.
 
 Each check works like the MFA one: a script that hits the tenant, and a
 `test_*.py` that proves the filter/flag logic with fake Graph responses
-(no network, no credential). All permissions in the table above are
-granted and admin-consented; the checks besides `audit_mfa.py` and
-`audit_stale_licensed.py` haven't been run against the real tenant yet.
+(no network, no credential). All 7 have been run and verified against the
+real tenant.
 
 ```bash
 python audit_mfa.py                          # Reports.Read.All, AuditLog.Read.All
@@ -84,4 +85,45 @@ python audit_ownerless_groups.py              # Group.Read.All
 python audit_devices.py                       # Device.Read.All
 
 python -m unittest discover -p "test_audit_*.py" -v
+```
+
+## Run the severity-ranked HTML report
+
+`build_report.py` runs all 7 checks and writes one HTML file, grouped
+CRITICAL / WARNING / INFO per the finding-to-tier mapping in
+`DECISIONS.md`. It needs all 7 permissions in the table above.
+
+```bash
+python build_report.py --output report.html
+python -m unittest test_build_report.py -v   # tier-assignment logic, no network
+```
+
+Open `report.html` in a browser. Two findings are tiered by more than
+their check alone: a no-MFA user is CRITICAL instead of WARNING if they
+also hold a privileged directory role (cross-referenced by Graph object
+id), and a service principal credential is CRITICAL instead of WARNING if
+its `endDateTime` has already passed rather than merely being within 30
+days.
+
+## Send the report by email
+
+`build_report.py` also calls `mailer.py` after writing the HTML file. If
+`GRAPH_SENDER_MAILBOX` and `GRAPH_REPORT_RECIPIENT` aren't set in `.env`,
+it just logs `report_email_not_sent` and moves on -- the report still
+gets written either way. This mirrors Project 1's digest mailer
+(`project-1-scheduled-pipeline/pipeline.py: send_digest_email`): same
+message shape, same `saveToSentItems: false`, same "skip, don't fail, if
+unconfigured" behavior. What's different: Project 1 fetches its own Graph
+token with a client secret; this reuses this project's own cert-based,
+throttle-aware `GraphClient.post()` instead of duplicating that fetch.
+
+`Mail.Send` is **not yet granted** (RBAC for Applications, scoped to one
+mailbox -- see the permissions table and `mailer.py`'s docstring for exact
+grant steps). Until it's granted, running `build_report.py` with the env
+vars set will 403 on the send; without the env vars set it silently skips
+sending, which is safe to run today.
+
+```bash
+python -m unittest test_mailer.py -v   # message shape + skip-when-unconfigured, no network
+python build_report.py --output report.html   # sends for real once GRAPH_SENDER_MAILBOX / GRAPH_REPORT_RECIPIENT are set and Mail.Send is granted
 ```

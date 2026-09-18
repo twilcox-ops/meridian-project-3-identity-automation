@@ -4,7 +4,18 @@
 - Stale account threshold: 90+ days since last interactive sign-in (signInActivity.lastSignInDateTime)
 - Service principal credential "nearing expiry": 30 days
 - Device "haven't checked in": 90 days
-- Severity ranking: 3-tier — CRITICAL / WARNING / INFO (finding-to-tier mapping to be documented as each check is built)
+- Severity ranking: 3-tier — CRITICAL / WARNING / INFO
+
+  Finding-to-tier mapping:
+  - No MFA, privileged-role user: CRITICAL
+  - No MFA, regular user: WARNING
+  - Stale + licensed account: WARNING
+  - Ownerless group: WARNING
+  - Privileged role holder (informational): INFO
+  - SP credential already expired: CRITICAL
+  - SP credential expiring within 30 days: WARNING
+  - Guest account (informational): INFO
+  - Non-compliant/stale device: WARNING
 - Password generation: random, meets Entra default complexity, throwaway test account only
 - License SKU: whatever's available in the dev tenant (document actual SKU used)
 - Write confirmation mechanism: typed UPN required for --execute

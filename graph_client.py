@@ -49,14 +49,15 @@ class GraphClient:
     def _access_token(self) -> str:
         return self.credential.get_token("https://graph.microsoft.com/.default").token
 
-    def get(self, url: str, params: dict | None = None) -> dict:
-        """GET one page, retrying on 429 by honoring Retry-After."""
+    def _request(self, method: str, url: str, **kwargs) -> dict:
+        """One HTTP call, retrying on 429 by honoring Retry-After. Shared by
+        get() and post() so throttling is handled in exactly one place."""
         if not url.startswith("http"):
             url = f"{GRAPH_BASE}{url}"
 
         for attempt in range(1, MAX_RETRIES + 1):
             headers = {"Authorization": f"Bearer {self._access_token()}"}
-            response = self.session.get(url, headers=headers, params=params)
+            response = getattr(self.session, method)(url, headers=headers, **kwargs)
 
             if response.status_code == 429:
                 wait = _parse_retry_after(response.headers.get("Retry-After"))
@@ -74,9 +75,19 @@ class GraphClient:
             if not response.ok:
                 log.error("HTTP %s from %s: %s", response.status_code, url, response.text)
             response.raise_for_status()
-            return response.json()
+            return response.json() if response.text else {}
 
         raise RuntimeError(f"Exceeded {MAX_RETRIES} retries against {url} (still throttled)")
+
+    def get(self, url: str, params: dict | None = None) -> dict:
+        """GET one page, retrying on 429 by honoring Retry-After."""
+        return self._request("get", url, params=params)
+
+    def post(self, url: str, json: dict | None = None) -> dict:
+        """POST (e.g. sendMail), retrying on 429 by honoring Retry-After.
+        Graph returns 202 with no body for sendMail, hence the empty-body
+        guard in _request()."""
+        return self._request("post", url, json=json)
 
     def get_paginated(self, url: str, params: dict | None = None):
         """Yield every item across all pages, following @odata.nextLink."""

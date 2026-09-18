@@ -40,14 +40,20 @@ class FakeResponse:
 
 
 class FakeSession:
-    """Returns queued responses in order, one per .get() call."""
+    """Returns queued responses in order, one per .get()/.post() call."""
 
     def __init__(self, responses):
         self._responses = list(responses)
         self.calls = []
+        self.posted_json = []
 
     def get(self, url, headers=None, params=None):
         self.calls.append(url)
+        return self._responses.pop(0)
+
+    def post(self, url, headers=None, json=None):
+        self.calls.append(url)
+        self.posted_json.append(json)
         return self._responses.pop(0)
 
 
@@ -111,6 +117,29 @@ class ThrottlingTests(unittest.TestCase):
             client.get("/users")
 
         mock_sleep.assert_called_once_with(5)
+
+
+class PostTests(unittest.TestCase):
+    def test_post_sends_json_body_and_handles_empty_response(self):
+        accepted = FakeResponse(202, text="")  # Graph's real sendMail response: 202, no body
+        session = FakeSession([accepted])
+        client = GraphClient(credential=FakeCredential(), session=session)
+
+        result = client.post("/users/me/sendMail", json={"message": {"subject": "hi"}})
+
+        self.assertEqual(result, {})
+        self.assertEqual(session.posted_json, [{"message": {"subject": "hi"}}])
+
+    def test_post_retries_on_429_same_as_get(self):
+        throttled = FakeResponse(429, headers={"Retry-After": "4"})
+        accepted = FakeResponse(202, text="")
+        session = FakeSession([throttled, accepted])
+        client = GraphClient(credential=FakeCredential(), session=session)
+
+        with patch("graph_client.time.sleep") as mock_sleep:
+            client.post("/users/me/sendMail", json={"message": {}})
+
+        mock_sleep.assert_called_once_with(4)
 
 
 if __name__ == "__main__":
